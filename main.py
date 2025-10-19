@@ -6,7 +6,7 @@ from openai import OpenAI
 import asyncio
 import base64
 import streamlit as st
-from agents import Agent, Runner, SQLiteSession, WebSearchTool, FileSearchTool
+from agents import Agent, Runner, SQLiteSession, WebSearchTool, FileSearchTool, ImageGenerationTool
 
 client = OpenAI()
 
@@ -17,6 +17,10 @@ session = SQLiteSession("chat-history", "chat-gpt-clone-memory.db")
 # agent : 최초 1번만 생성
 if "agent" not in st.session_state:
     st.session_state["agent"] = Agent(
+        # 별도 인증절차를 거치지 않으면 권한 문제로 이미지 생성이 안됨
+        # 버전을 낮추면 된다는 내용이 있어서 버전을 낮췄으나 지속적으로 에러남
+        # 인증을 하고 싶지 않으므로 이미지 생성 테스트 X
+        #model = "gpt-3.5-turbo",
         name = "ChatGPT Clone",
         instructions = """
         당신은 도움이 되는 조수입니다.
@@ -33,6 +37,15 @@ if "agent" not in st.session_state:
                 ],
                 # 파일이 여러개 있을 때, 상위 3개 파일만 가져옴
                 max_num_results = 3
+            ),
+            ImageGenerationTool(
+                tool_config = {
+                    "type": "image_generation",
+                    "quality": "low",
+                    "output_format": "jpeg",
+                    "moderation": "low",
+                    "partial_images": 1
+                }
             )
         ]
     )
@@ -68,12 +81,18 @@ async def paint_history():
                         # escape sequence가 잘못 인식돼서 강의랑 다르게 \ > \\ 로 처리
                         st.write(message["content"][0]["text"].replace("$", "\\$"))
         if "type" in message:
-            if message["type"] == "web_search_call":
+            message_type = message["type"]
+
+            if message_type == "web_search_call":
                 with st.chat_message("ai"):
                     st.write("🔎 Searched the web...")
-            elif message["type"] == "file_search_call":
+            elif message_type == "file_search_call":
                 with st.chat_message("ai"):
                     st.write("🔎 Searched the files...")
+            elif message_type == "image_generation_call":
+                image = base64.b64decode(message["result"])
+                with st.chat_message("ai"):
+                    st.image(image)
 
 asyncio.run(paint_history())
 
@@ -86,6 +105,8 @@ def update_status(status_container, event):
         "response.file_search_call.completed": ("✅ File search completed.", "complete"),
         "response.file_search_call.in_progress": ("📁 Starting file search...", "running"),
         "response.file_search_call.searching": ("📁 File search in progress...", "running"),
+        "response.image_generation_call.generating": ("🎨 Drawing image...", "running"),
+        "response.image_generation_call.in_progress": ("🎨 Drawing image...", "running"),
         "response.completed": ("", "complete")
     }
 
@@ -98,6 +119,7 @@ async def run_agent(message):
     with st.chat_message("assistant"):
         status_container = st.status("⌛", expanded = False)
         text_placeholder = st.empty()
+        image_placeholder = st.empty()
         response = ""
 
         stream = Runner.run_streamed(
@@ -112,8 +134,11 @@ async def run_agent(message):
                 update_status(status_container, event.data.type)
 
                 if event.data.type == "response.output_text.delta":
-                        response += event.data.delta
-                        text_placeholder.write(response.replace("$", "\\$"))
+                    response += event.data.delta
+                    text_placeholder.write(response.replace("$", "\\$"))
+                elif event.data.type == "response.image_generation_call.partial_image":
+                    image = base64.b64decode(event.data.partial_image_b64)
+                    image_placeholder.image(image)
 
 ############################################
 #################### UI ####################

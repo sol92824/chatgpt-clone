@@ -6,7 +6,7 @@ from openai import OpenAI
 import asyncio
 import base64
 import streamlit as st
-from agents import Agent, Runner, SQLiteSession, WebSearchTool, FileSearchTool, ImageGenerationTool, CodeInterpreterTool
+from agents import Agent, Runner, SQLiteSession, WebSearchTool, FileSearchTool, ImageGenerationTool, CodeInterpreterTool, HostedMCPTool
 
 client = OpenAI()
 
@@ -52,8 +52,21 @@ if "agent" not in st.session_state:
                 tool_config = {
                     "type": "code_interpreter",
                     "container": {
-                        "type": "auto"
+                        "type": "auto",
+                        # file_ids를 넘겨주면 해당 file에 대해 CodeInterpreterTool이 접근할 수 있는 권한을 주는 것
+                        # 코드 생성시, import해서 사용 가능
+                        # "file_ids": [...]
                     }
+                }
+            ),
+            # MCP Tool : 외부 서버에 있는 문서나 소프트웨어 프로젝트 관련 자료를 조회/검색할 수 있는 도구
+            HostedMCPTool(
+                tool_config = {
+                    "type": "mcp",
+                    "server_url": "https://mcp.context7.com/mcp",
+                    "server_label": "Context7",
+                    "server_description": "Use this to get the docs from software projects.",
+                    "require_approval": "never"
                 }
             )
         ]
@@ -105,6 +118,13 @@ async def paint_history():
             elif message_type == "code_interpreter_call":
                 with st.chat_message("ai"):
                     st.code(message["code"])
+            elif message_type == "mcp_list_tools":
+                with st.chat_message("ai"):
+                    st.write(f"Listed {message["server_label"]}'s tools")
+            elif message_type == "mcp_call":
+                with st.chat_message("ai"):
+                    st.write(f"Called {message["server_label"]}'s {message["name"]} with args {message["arguments"]}")
+
 
 asyncio.run(paint_history())
 
@@ -123,6 +143,12 @@ def update_status(status_container, event):
         "response.code_interpreter_call_code.completed": ("🤖 Ran code.", "complete"),
         "response.code_interpreter_call_code.in_progress": ("🤖 Running code...", "complete"),
         "response.code_interpreter_call_code.interpreting": ("🤖 Running code...", "complete"),
+        "response.mcp_call.completed": ("🛠️ Called MCP tool", "complete"),
+        "response.mcp_call.failed": ("🛠️ Error calling MCP tool", "complete"),
+        "response.mcp_call.in_progress": ("🛠️ Calling MCP tool", "running"),
+        "response.mcp_list_tools.completed": ("🛠️ Listed MCP tools", "complete"),
+        "response.mcp_list_tools.failed": ("🛠️ Error listing MCP tools", "complete"),
+        "response.mcp_list_tools.in_progress": ("🛠️ Listing MCP tools", "running"),
         "response.completed": ("", "complete")
     }
 
@@ -164,10 +190,6 @@ async def run_agent(message):
                 elif event.data.type == "response.image_generation_call.partial_image":
                     image = base64.b64decode(event.data.partial_image_b64)
                     image_placeholder.image(image)
-                elif event.data.type == "response.completed":
-                    image_placeholder.empty()
-                    text_placeholder.empty()
-                    code_placeholder.empty()
 
 ############################################
 #################### UI ####################

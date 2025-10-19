@@ -1,40 +1,19 @@
 import streamlit as st
-import time
 
-st.header("Hello world!")
+# streamlit을 쓸 때 주의사항
+# 내부 데이터가 변경되면 전체 streamlit 소스가 재실행
+# 리렌더링의 영향없이 유지하고 싶은 데이터는 session_state를 통해 저장
 
-st.button("Click me please!")
+# session_state에 is_admin이 없다면 실행 (최초 1회만 실행)
+if "is_admin" not in st.session_state:
+    st.session_state["is_admin"] = False
 
-st.text_input(
-    "Write your API KEY",
-    max_chars = 20
-)
+st.header("Hello!")
 
-st.feedback("faces")
+name = st.text_input("What is your name?")
 
-with st.sidebar:
-    st.badge("Badge 1")
+if name:
+    st.write(f"Hello {name}")
+    st.session_state["is_admin"] = True
 
-tab1, tab2, tab3 = st.tabs(["Agents", "Chat", "Output"])
-
-with tab1:
-    st.header("Agent")
-with tab2:
-    st.header("Agent 2")
-with tab3:
-    st.header("Agent 3")
-
-with st.chat_message("ai"):
-    st.text("Hello!")
-    with st.status("Agent is using tool") as status:
-        time.sleep(1)
-        status.update(label = "Agent is searching the web...")
-        time.sleep(2)
-        status.update(label = "Agent is reading the page...")
-        time.sleep(3)
-        status.update(state = "complete")
-        
-with st.chat_message("human"):
-    st.text("Hi! How are you?")
-
-st.chat_input("Write a message for the assistant.", accept_file = True)
+print(st.session_state["is_admin"])

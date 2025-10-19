@@ -6,7 +6,7 @@ from openai import OpenAI
 import asyncio
 import base64
 import streamlit as st
-from agents import Agent, Runner, SQLiteSession, WebSearchTool, FileSearchTool, ImageGenerationTool
+from agents import Agent, Runner, SQLiteSession, WebSearchTool, FileSearchTool, ImageGenerationTool, CodeInterpreterTool
 
 client = OpenAI()
 
@@ -19,8 +19,8 @@ if "agent" not in st.session_state:
     st.session_state["agent"] = Agent(
         # 별도 인증절차를 거치지 않으면 권한 문제로 이미지 생성이 안됨
         # 버전을 낮추면 된다는 내용이 있어서 버전을 낮췄으나 지속적으로 에러남
-        # 인증을 하고 싶지 않으므로 이미지 생성 테스트 X
-        #model = "gpt-3.5-turbo",
+        # 인증을 하고 싶지 않으므로 이미지 생성 테스트 X (ImageGenerationTool을 연결하면 다른 작업도 테스트 안되서 주석으로 변경)
+        # model = "gpt-4o-mini",
         name = "ChatGPT Clone",
         instructions = """
         당신은 도움이 되는 조수입니다.
@@ -28,6 +28,7 @@ if "agent" not in st.session_state:
         당신은 다음 tool에 접근할 수 있습니다:
             - Web Search Tool : 사용자가 당신의 학습 데이터에 없는 질문을 할 때 사용하세요. 이 도구를 이용해 최신 사건이나 현재 정보를 확인할 수 있습니다.
             - File Search Tool : 사용자가 자신과 관련된 사실에 대해 묻거나, 특정 파일에 대한 질문을 할 때 이 도구를 사용하세요.
+            - Code Interpreter Tool : 사용자의 질문에 답하기 위해 코드를 작성하고 실행해야 할 때 이 도구를 사용하세요.
         """,
         tools = [
             WebSearchTool(),
@@ -38,13 +39,21 @@ if "agent" not in st.session_state:
                 # 파일이 여러개 있을 때, 상위 3개 파일만 가져옴
                 max_num_results = 3
             ),
-            ImageGenerationTool(
+            # ImageGenerationTool(
+            #     tool_config = {
+            #         "type": "image_generation",
+            #         "quality": "low",
+            #         "output_format": "jpeg",
+            #         "moderation": "low",
+            #         "partial_images": 1
+            #     }
+            # ),
+            CodeInterpreterTool(
                 tool_config = {
-                    "type": "image_generation",
-                    "quality": "low",
-                    "output_format": "jpeg",
-                    "moderation": "low",
-                    "partial_images": 1
+                    "type": "code_interpreter",
+                    "container": {
+                        "type": "auto"
+                    }
                 }
             )
         ]
@@ -93,6 +102,9 @@ async def paint_history():
                 image = base64.b64decode(message["result"])
                 with st.chat_message("ai"):
                     st.image(image)
+            elif message_type == "code_interpreter_call":
+                with st.chat_message("ai"):
+                    st.code(message["code"])
 
 asyncio.run(paint_history())
 
@@ -107,6 +119,10 @@ def update_status(status_container, event):
         "response.file_search_call.searching": ("📁 File search in progress...", "running"),
         "response.image_generation_call.generating": ("🎨 Drawing image...", "running"),
         "response.image_generation_call.in_progress": ("🎨 Drawing image...", "running"),
+        "response.code_interpreter_call_code.done": ("🤖 Ran code.", "complete"),
+        "response.code_interpreter_call_code.completed": ("🤖 Ran code.", "complete"),
+        "response.code_interpreter_call_code.in_progress": ("🤖 Running code...", "complete"),
+        "response.code_interpreter_call_code.interpreting": ("🤖 Running code...", "complete"),
         "response.completed": ("", "complete")
     }
 
@@ -118,9 +134,15 @@ def update_status(status_container, event):
 async def run_agent(message):
     with st.chat_message("assistant"):
         status_container = st.status("⌛", expanded = False)
-        text_placeholder = st.empty()
+        code_placeholder = st.empty()
         image_placeholder = st.empty()
+        text_placeholder = st.empty()
         response = ""
+        code_response = ""
+
+        st.session_state["code_placeholder"] = code_placeholder
+        st.session_state["image_placeholder"] = image_placeholder
+        st.session_state["text_placeholder"] = text_placeholder
 
         stream = Runner.run_streamed(
             agent, 
@@ -136,9 +158,16 @@ async def run_agent(message):
                 if event.data.type == "response.output_text.delta":
                     response += event.data.delta
                     text_placeholder.write(response.replace("$", "\\$"))
+                elif event.data.type == "response.code_interpreter_call_code.delta":
+                    code_response += event.data.delta
+                    code_placeholder.code(code_response)
                 elif event.data.type == "response.image_generation_call.partial_image":
                     image = base64.b64decode(event.data.partial_image_b64)
                     image_placeholder.image(image)
+                elif event.data.type == "response.completed":
+                    image_placeholder.empty()
+                    text_placeholder.empty()
+                    code_placeholder.empty()
 
 ############################################
 #################### UI ####################
@@ -152,6 +181,13 @@ prompt = st.chat_input(
 )
 
 if prompt:
+    
+    if "code_placeholder" in st.session_state:
+        st.session_state["code_placeholder"].empty()
+    if "image_placeholder" in st.session_state:
+        st.session_state["image_placeholder"].empty()
+    if "text_placeholder" in st.session_state:
+        st.session_state["text_placeholder"].empty()
 
     for file in prompt.files:
         if file.type.startswith("text/"):

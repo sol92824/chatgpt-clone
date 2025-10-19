@@ -3,7 +3,7 @@ import asyncio
 
 dotenv.load_dotenv()
 
-from agents import Agent, Runner, SQLiteSession, function_tool
+from agents import Agent, Runner, SQLiteSession, function_tool, trace
 from agents.extensions.visualization import draw_graph
 from pydantic import BaseModel
 
@@ -58,12 +58,21 @@ async def main():
     # run : 최종 처리 내역 리턴
     # run_sync : await를 사용하지 못하거나 사용하지 않고 싶을 때 (run과 결과값 동일)
     # run_streamed : 실시간으로 처리 내역 리턴
-    result = await Runner.run(
-        # starting agent
-        main_agent,
-        "태국 북부 지방의 수도는 어디야?",
-        session = session,
-    )
+    # trace를 그룹별로 보고 싶은 경우, trace("그룹명")
+    with trace("user_1"):
+        result = await Runner.run(
+            # starting agent
+            main_agent,
+            "태국 북부 지방의 수도는 어디야?",
+            session = session,
+        )
+
+        result = await Runner.run(
+            # starting agent
+            main_agent,
+            "미국의 수도는 어디야?",
+            session = session,
+        )
 
     print(result.last_agent.name)
     print(result.final_output)
